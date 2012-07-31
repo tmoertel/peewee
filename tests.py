@@ -303,6 +303,8 @@ class QueryTests(BasePeeweeTestCase):
         self.assertSQLEqual(sq.sql(), ('SELECT `id`, `title` FROM `blog` WHERE (`id` = ? AND `title` = ?)', [1, 'a']))
         sq2 = SelectQuery(Blog, '*').where((Blog.id == 1) & (Blog.title == 'a'))
         self.assertEqual(sq.sql(), sq2.sql())
+        sq3 = SelectQuery(Blog, '*').where(1, title='a')
+        self.assertSQLEqual(sq3.sql(), ('SELECT `id`, `title` FROM `blog` WHERE (`id` = ? AND `title` = ?)', [1, 'a']))
 
         # check that chaining works as expected
         sq = SelectQuery(Blog, '*').where(title='a').where(id=1)
@@ -832,10 +834,14 @@ class ModelTests(BaseModelTestCase):
         b2 = Blog.get(title='b')
         self.assertEqual(b2.id, b.id)
 
+        b3 = Blog.get(a.id)
+        self.assertEqual(b3.id, a.id)
+
         self.assertQueriesEqual([
             ('INSERT INTO `blog` (`title`) VALUES (?)', ['a']),
             ('INSERT INTO `blog` (`title`) VALUES (?)', ['b']),
             ('SELECT `id`, `title` FROM `blog` WHERE `title` = ? LIMIT 1', ['b']),
+            ('SELECT `id`, `title` FROM `blog` WHERE `id` = ? LIMIT 1', [a.id]),
         ])
 
     def test_select_with_get(self):
@@ -2216,6 +2222,12 @@ class FilterQueryTests(BaseModelTestCase):
         query = Entry.filter(title='e1', pk=1)
         self.assertSQL(query, [
             ('(`pk` = ? AND `title` = ?)', [1, 'e1']),
+        ])
+
+        query = Entry.filter(1, title='e1')
+        self.assertSQL(query, [
+            ('`pk` = ?', [1]),
+            ('`title` = ?', ['e1']),
         ])
 
         query = Entry.filter(title='e1', pk=1, blog__title='b1')
