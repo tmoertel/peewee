@@ -883,6 +883,23 @@ class Q(Leaf):
         return expr
 
 
+class PK(Q):
+    """Represents a value comparison on an arbitrary model's primary key."""
+    def __init__(self, value, test='eq'):
+        super(PK, self).__init__()
+        self.value = value
+        self.test = test
+
+    def get_query(self):
+        key = '%s__%s' % (self.model._meta.pk_name, self.test)
+        return {key: self.value}
+
+    def set_query(self, _value):
+        pass  # no op
+
+    query = property(get_query, set_query)
+
+
 class F(object):
     def __init__(self, field, model=None):
         self.field = field
@@ -1917,6 +1934,8 @@ def filter_query(model_or_query, *args, **kwargs):
         if isinstance(node_or_q, Node):
             for child in node_or_q.children:
                 fix_q(child, joins)
+        elif isinstance(node_or_q, PK):
+            node_or_q.model = node_or_q.model or model
         elif isinstance(node_or_q, Q):
             new_query = {}
             curr_model = node_or_q.model or model

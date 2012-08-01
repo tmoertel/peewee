@@ -11,7 +11,7 @@ import unittest
 
 from peewee import *
 from peewee import logger, VarCharColumn, SelectQuery, DeleteQuery, UpdateQuery, \
-        InsertQuery, RawQuery, parseq, Database, SqliteAdapter, \
+        InsertQuery, RawQuery, parseq, Database, SqliteAdapter, PK, \
         create_model_tables, drop_model_tables, sort_models_topologically, Node
 
 
@@ -346,6 +346,36 @@ class QueryTests(BasePeeweeTestCase):
 
         # test mixing it all up
         sq = SelectQuery(Blog, '*').where(Q(title='a') | Q(id=1)).where((Q(title='c') | Q(id=3)), title='b')
+        self.assertSQLEqual(sq.sql(), ('SELECT `id`, `title` FROM `blog` WHERE (`title` = ? OR `id` = ?) AND (`title` = ? OR `id` = ?) AND `title` = ?', ['a', 1, 'c', 3, 'b']))
+
+    def test_select_with_pk(self):
+        sq = SelectQuery(Blog, '*').where(Q(title='a') | PK(1))
+        self.assertSQLEqual(sq.sql(), ('SELECT `id`, `title` FROM `blog` WHERE (`title` = ? OR `id` = ?)', ['a', 1]))
+        sq2 = SelectQuery(Blog, '*').where((Blog.title == 'a') | PK(1))
+        self.assertEqual(sq.sql(), sq2.sql())
+
+        sq = SelectQuery(Blog, '*').where(Q(title='a') | PK(1) | PK(3))
+        self.assertSQLEqual(sq.sql(), ('SELECT `id`, `title` FROM `blog` WHERE (`title` = ? OR `id` = ? OR `id` = ?)', ['a', 1, 3]))
+        sq2 = SelectQuery(Blog, '*').where((Blog.title == 'a') | PK(1) | PK(3))
+        self.assertEqual(sq.sql(), sq2.sql())
+
+        # test simple chaining
+        sq = SelectQuery(Blog, '*').where(Q(title='a') | PK(1)).where(PK(3))
+        self.assertSQLEqual(sq.sql(), ('SELECT `id`, `title` FROM `blog` WHERE (`title` = ? OR `id` = ?) AND `id` = ?', ['a', 1, 3]))
+        sq2 = SelectQuery(Blog, '*').where((Blog.title == 'a') | PK(1)).where(PK(3))
+        self.assertEqual(sq.sql(), sq2.sql())
+
+        sq = SelectQuery(Blog, '*').where(Q(title='a') | PK(1)).where(PK(3))
+        self.assertSQLEqual(sq.sql(), ('SELECT `id`, `title` FROM `blog` WHERE (`title` = ? OR `id` = ?) AND `id` = ?', ['a', 1, 3]))
+
+        # test chaining with Q objects
+        sq = SelectQuery(Blog, '*').where(Q(title='a') | PK(1)).where((Q(title='c') | PK(3)))
+        self.assertSQLEqual(sq.sql(), ('SELECT `id`, `title` FROM `blog` WHERE (`title` = ? OR `id` = ?) AND (`title` = ? OR `id` = ?)', ['a', 1, 'c', 3]))
+        sq2 = SelectQuery(Blog, '*').where((Blog.title == 'a') | PK(1)).where((Blog.title=='c')|PK(3))
+        self.assertEqual(sq.sql(), sq2.sql())
+
+        # test mixing it all up
+        sq = SelectQuery(Blog, '*').where(Q(title='a') | PK(1)).where((Q(title='c') | PK(3)), title='b')
         self.assertSQLEqual(sq.sql(), ('SELECT `id`, `title` FROM `blog` WHERE (`title` = ? OR `id` = ?) AND (`title` = ? OR `id` = ?) AND `title` = ?', ['a', 1, 'c', 3, 'b']))
 
     def test_select_with_negation(self):
@@ -837,10 +867,14 @@ class ModelTests(BaseModelTestCase):
         b3 = Blog.get(a.id)
         self.assertEqual(b3.id, a.id)
 
+        b4 = Blog.get(PK(a.id))
+        self.assertEqual(b4.id, a.id)
+
         self.assertQueriesEqual([
             ('INSERT INTO `blog` (`title`) VALUES (?)', ['a']),
             ('INSERT INTO `blog` (`title`) VALUES (?)', ['b']),
             ('SELECT `id`, `title` FROM `blog` WHERE `title` = ? LIMIT 1', ['b']),
+            ('SELECT `id`, `title` FROM `blog` WHERE `id` = ? LIMIT 1', [a.id]),
             ('SELECT `id`, `title` FROM `blog` WHERE `id` = ? LIMIT 1', [a.id]),
         ])
 
@@ -2230,9 +2264,22 @@ class FilterQueryTests(BaseModelTestCase):
             ('`title` = ?', ['e1']),
         ])
 
+        query = Entry.filter(PK(1), title='e1')
+        self.assertSQL(query, [
+            ('`pk` = ?', [1]),
+            ('`title` = ?', ['e1']),
+        ])
+
         query = Entry.filter(title='e1', pk=1, blog__title='b1')
         self.assertSQL(query, [
             ('(t1.`pk` = ? AND t1.`title` = ?)', [1, 'e1']),
+            ('t2.`title` = ?', ['b1'])
+        ])
+
+        query = Entry.filter(PK(1), title='e1', blog__title='b1')
+        self.assertSQL(query, [
+            ('t1.`pk` = ?', [1]),
+            ('t1.`title` = ?', ['e1']),
             ('t2.`title` = ?', ['b1'])
         ])
 
@@ -2240,6 +2287,19 @@ class FilterQueryTests(BaseModelTestCase):
         self.assertSQL(query, [
             ('(t1.`pk` = ? AND t1.`title` = ?)', [1, 'e1']),
             ('(t2.`id` = ? AND t2.`title` = ?)', [2, 'b1']),
+        ])
+
+    def test_filter_with_pk(self):
+        query = Entry.filter(Q(title='e1') | Q(title='e2') | Q(title='e3'), PK(1) | PK(2))
+        self.assertSQL(query, [
+            ('(`title` = ? OR `title` = ? OR `title` = ?)', ['e1', 'e2', 'e3']),
+            ('(`pk` = ? OR `pk` = ?)', [1, 2])
+        ])
+
+        query = Entry.filter(Q(title='e1') | Q(title='e2'), PK(1))
+        self.assertSQL(query, [
+            ('(`title` = ? OR `title` = ?)', ['e1', 'e2']),
+            ('`pk` = ?', [1])
         ])
 
     def test_filter_with_q(self):
